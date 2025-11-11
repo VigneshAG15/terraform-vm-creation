@@ -110,28 +110,3 @@ variable "number_of_vms" {
     error_message = "number_of_vms must be between 1 and 100."
   }
 }
-
-# === Azure Authentication (Sensitive) ===
-variable "subscription_id" {
-  type        = string
-  description = "Azure Subscription ID"
-  sensitive   = true
-}
-
-variable "client_id" {
-  type        = string
-  description = "Service Principal App ID"
-  sensitive   = true
-}
-
-variable "tenant_id" {
-  type        = string
-  description = "Azure AD Tenant ID"
-  sensitive   = true
-}
-
-variable "client_secret" {
-  type        = string
-  description = "Service Principal Secret"
-  sensitive   = true
-}

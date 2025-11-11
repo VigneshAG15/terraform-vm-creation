@@ -5,10 +5,19 @@ terraform {
       version = "~> 4.0"
     }
   }
+
+  backend "remote" {
+    organization = "ArcheGlobal-AG"
+    workspaces {
+      name = "auto-vm-creation"
+    }
+  }
 }
 
 provider "azurerm" {
   features {}
+  # Authentication via environment variables (set in TFC)
+  # ARM_SUBSCRIPTION_ID, ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_TENANT_ID
 }
 
 # =========================================================
@@ -28,19 +37,28 @@ locals {
   rg_name     = coalesce(try(data.azurerm_resource_group.existing_rg.name, null), try(azurerm_resource_group.rg[0].name, null))
   rg_location = coalesce(try(data.azurerm_resource_group.existing_rg.location, null), try(azurerm_resource_group.rg[0].location, var.location))
 
-  # -------------------------------------------------------
-  # Zone handling – true only when user picks 1/2/3
-  # -------------------------------------------------------
   use_zone = contains(["1", "2", "3"], var.availability_zone)
-
-  # -------------------------------------------------------
-  # Disk size – Windows images need at least 128 GiB
-  # -------------------------------------------------------
   disk_size_gb = var.os_type == "Windows" ? max(var.disk_size, 128) : var.disk_size
+
+  # Generate random password (overrides hardcoded one)
+  admin_password = random_password.vm_password.result
 }
 
 # =========================================================
-# Virtual Network & Subnet (shared per environment)
+# Random Password (Secure)
+# =========================================================
+resource "random_password" "vm_password" {
+  length  = 16
+  special = true
+  override_special = "!@#$%&*()-_=+"
+  min_lower = 1
+  min_upper = 1
+  min_numeric = 1
+  min_special = 1
+}
+
+# =========================================================
+# Virtual Network & Subnet
 # =========================================================
 resource "azurerm_virtual_network" "vnet" {
   name                = "${var.environment}-vnet"
@@ -57,21 +75,17 @@ resource "azurerm_subnet" "subnet" {
 }
 
 # =========================================================
-# Public IP – Basic (regional) or Standard (zonal)
+# Public IP
 # =========================================================
 resource "azurerm_public_ip" "vm_ip" {
   count               = var.number_of_vms
   name                = "${var.environment}-vm-${count.index}-ip"
   location            = local.rg_location
   resource_group_name = local.rg_name
-
-  # Dynamic allocation for Basic, Static for Standard
-  allocation_method = local.use_zone ? "Static" : "Dynamic"
-  sku               = local.use_zone ? "Standard" : "Basic"
-  sku_tier          = "Regional"
-
-  # Only set zones when we really need them
-  zones = local.use_zone ? [var.availability_zone] : null
+  allocation_method   = local.use_zone ? "Static" : "Dynamic"
+  sku                 = local.use_zone ? "Standard" : "Basic"
+  sku_tier            = "Regional"
+  zones               = local.use_zone ? [var.availability_zone] : null
 }
 
 # =========================================================
@@ -92,7 +106,7 @@ resource "azurerm_network_interface" "vm_nic" {
 }
 
 # =========================================================
-# LINUX VMs (Conditional)
+# LINUX VMs
 # =========================================================
 resource "azurerm_linux_virtual_machine" "linux_vm" {
   count                 = var.os_type == "Linux" ? var.number_of_vms : 0
@@ -101,8 +115,9 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
   resource_group_name   = local.rg_name
   size                  = var.vm_size
   admin_username        = "azureuser"
-  admin_password        = "P@ssword1234!"
+  admin_password        = local.admin_password
   network_interface_ids = [azurerm_network_interface.vm_nic[count.index].id]
+  disable_password_authentication = false
 
   os_disk {
     name                 = "${var.environment}-osdisk-${count.index}"
@@ -118,9 +133,6 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
     version   = "latest"
   }
 
-  disable_password_authentication = false
-
-  # ---- zone only when requested ----
   zone = local.use_zone ? var.availability_zone : null
 
   lifecycle {
@@ -144,7 +156,7 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 }
 
 # =========================================================
-# WINDOWS VMs (Conditional)
+# WINDOWS VMs
 # =========================================================
 resource "azurerm_windows_virtual_machine" "windows_vm" {
   count                 = var.os_type == "Windows" ? var.number_of_vms : 0
@@ -153,14 +165,14 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   resource_group_name   = local.rg_name
   size                  = var.vm_size
   admin_username        = "azureuser"
-  admin_password        = "P@ssword1234!"
+  admin_password        = local.admin_password
   network_interface_ids = [azurerm_network_interface.vm_nic[count.index].id]
 
   os_disk {
     name                 = "${var.environment}-osdisk-${count.index}"
     caching              = "ReadWrite"
     storage_account_type = var.disk_type
-    disk_size_gb         = local.disk_size_gb   # <-- guaranteed >=128
+    disk_size_gb         = local.disk_size_gb
   }
 
   source_image_reference {
@@ -170,7 +182,6 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     version   = "latest"
   }
 
-  # ---- zone only when requested ----
   zone = local.use_zone ? var.availability_zone : null
 
   lifecycle {
@@ -191,4 +202,31 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     OS_Name     = "Windows"
     OS_Version  = var.os_version_details
   }
+}
+
+# =========================================================
+# OUTPUTS – CRITICAL FOR PYTHON SCRIPT
+# =========================================================
+output "vm_public_ips" {
+  description = "Public IP addresses of created VMs"
+  value       = azurerm_public_ip.vm_ip[*].ip_address
+}
+
+output "admin_username" {
+  description = "Admin username for VMs"
+  value       = "azureuser"
+}
+
+output "admin_password" {
+  description = "Auto-generated admin password"
+  value       = local.admin_password
+  sensitive   = true
+}
+
+output "vm_names" {
+  description = "Names of created VMs"
+  value = coalesce(
+    azurerm_linux_virtual_machine.linux_vm[*].name,
+    azurerm_windows_virtual_machine.windows_vm[*].name
+  )
 }
