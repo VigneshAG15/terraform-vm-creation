@@ -5,19 +5,10 @@ terraform {
       version = "~> 4.0"
     }
   }
-
-  backend "remote" {
-    organization = "ArcheGlobal-AG"
-    workspaces {
-      name = "auto-vm-creation"
-    }
-  }
 }
 
 provider "azurerm" {
   features {}
-  # Authentication via environment variables (set in TFC)
-  # ARM_SUBSCRIPTION_ID, ARM_CLIENT_ID, ARM_CLIENT_SECRET, ARM_TENANT_ID
 }
 
 # =========================================================
