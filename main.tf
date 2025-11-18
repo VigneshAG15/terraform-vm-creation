@@ -1,18 +1,12 @@
-terraform {
-  required_providers {
-    azurerm = {
-      source  = "hashicorp/azurerm"
-      version = "~> 4.0"
-    }
-  }
-}
+# main.tf — ONLY resources, locals, and provider
+# No terraform {}, no required_providers, no outputs — those go in versions.tf and outputs.tf
 
 provider "azurerm" {
   features {}
 }
 
 # =========================================================
-# Resource Group – auto-detect or create
+# Resource Group – auto-detect or create if not exists
 # =========================================================
 data "azurerm_resource_group" "existing_rg" {
   name = var.resource_group
@@ -28,24 +22,24 @@ locals {
   rg_name     = coalesce(try(data.azurerm_resource_group.existing_rg.name, null), try(azurerm_resource_group.rg[0].name, null))
   rg_location = coalesce(try(data.azurerm_resource_group.existing_rg.location, null), try(azurerm_resource_group.rg[0].location, var.location))
 
-  use_zone = contains(["1", "2", "3"], var.availability_zone)
+  use_zone     = contains(["1", "2", "3"], var.availability_zone)
   disk_size_gb = var.os_type == "Windows" ? max(var.disk_size, 128) : var.disk_size
 
-  # Generate random password (overrides hardcoded one)
+  # Final password passed to VM
   admin_password = random_password.vm_password.result
 }
 
 # =========================================================
-# Random Password (Secure)
+# Random Secure Password
 # =========================================================
 resource "random_password" "vm_password" {
-  length  = 16
-  special = true
+  length           = 16
+  special          = true
   override_special = "!@#$%&*()-_=+"
-  min_lower = 1
-  min_upper = 1
-  min_numeric = 1
-  min_special = 1
+  min_lower        = 1
+  min_upper        = 1
+  min_numeric      = 1
+  min_special      = 1
 }
 
 # =========================================================
@@ -100,15 +94,15 @@ resource "azurerm_network_interface" "vm_nic" {
 # LINUX VMs
 # =========================================================
 resource "azurerm_linux_virtual_machine" "linux_vm" {
-  count                 = var.os_type == "Linux" ? var.number_of_vms : 0
-  name                  = "${var.environment}-vm-${count.index}"
-  location              = local.rg_location
-  resource_group_name   = local.rg_name
-  size                  = var.vm_size
-  admin_username        = "azureuser"
-  admin_password        = local.admin_password
-  network_interface_ids = [azurerm_network_interface.vm_nic[count.index].id]
+  count                           = var.os_type == "Linux" ? var.number_of_vms : 0
+  name                            = "${var.environment}-vm-${count.index}"
+  location                        = local.rg_location
+  resource_group_name             = local.rg_name
+  size                            = var.vm_size
+  admin_username                  = "azureuser"
+  admin_password                  = local.admin_password
   disable_password_authentication = false
+  network_interface_ids           = [azurerm_network_interface.vm_nic[count.index].id]
 
   os_disk {
     name                 = "${var.environment}-osdisk-${count.index}"
@@ -150,13 +144,13 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 # WINDOWS VMs
 # =========================================================
 resource "azurerm_windows_virtual_machine" "windows_vm" {
-  count                 = var.os_type == "Windows" ? var.number_of_vms : 0
-  name                  = "${var.environment}-vm-${count.index}"
-  location              = local.rg_location
-  resource_group_name   = local.rg_name
-  size                  = var.vm_size
-  admin_username        = "azureuser"
-  admin_password        = local.admin_password
+  count               = var.os_type == "Windows" ? var.number_of_vms : 0
+  name                = "${var.environment}-vm-${count.index}"
+  location            = local.rg_location
+  resource_group_name = local.rg_name
+  size                = var.vm_size
+  admin_username      = "azureuser"
+  admin_password      = local.admin_password
   network_interface_ids = [azurerm_network_interface.vm_nic[count.index].id]
 
   os_disk {
@@ -193,31 +187,4 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
     OS_Name     = "Windows"
     OS_Version  = var.os_version_details
   }
-}
-
-# =========================================================
-# OUTPUTS – CRITICAL FOR PYTHON SCRIPT
-# =========================================================
-output "vm_public_ips" {
-  description = "Public IP addresses of created VMs"
-  value       = azurerm_public_ip.vm_ip[*].ip_address
-}
-
-output "admin_username" {
-  description = "Admin username for VMs"
-  value       = "azureuser"
-}
-
-output "admin_password" {
-  description = "Auto-generated admin password"
-  value       = local.admin_password
-  sensitive   = true
-}
-
-output "vm_names" {
-  description = "Names of created VMs"
-  value = coalesce(
-    azurerm_linux_virtual_machine.linux_vm[*].name,
-    azurerm_windows_virtual_machine.windows_vm[*].name
-  )
 }

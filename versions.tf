@@ -5,7 +5,7 @@ terraform {
   required_providers {
     azurerm = {
       source  = "hashicorp/azurerm"
-      version = "~> 3.116.0"   # or "~> 4.0" if you really want v4
+      version = "~> 3.116.0"   # Use 3.x for stability (4.0 has breaking changes)
     }
     random = {
       source  = "hashicorp/random"
@@ -13,8 +13,7 @@ terraform {
     }
   }
 
-  # This backend block is IGNORED when using Terraform Cloud
-  # (it's only for local runs — safe to keep)
+  # This is ignored in Terraform Cloud — safe to keep for local testing
   backend "remote" {
     organization = "ArcheGlobal-AG"
     workspaces {

@@ -24,11 +24,5 @@ output "vm_names" {
 }
 
 output "resource_group_name" {
-  description = "Final resource group used"
-  value       = local.rg_name
-}
-
-output "run_id" {
-  description = "For debugging – shows when this run happened"
-  value       = timestamp()
+  value = local.rg_name
 }
