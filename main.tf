@@ -95,7 +95,7 @@ resource "azurerm_network_interface" "vm_nic" {
 # =========================================================
 resource "azurerm_linux_virtual_machine" "linux_vm" {
   count                           = var.os_type == "Linux" ? var.number_of_vms : 0
-  name                            = "${var.environment}-terraform-vm-${count.index}"
+  name                            = "${var.environment}-TF-vm-${count.index}"
   location                        = local.rg_location
   resource_group_name             = local.rg_name
   size                            = var.vm_size
@@ -145,7 +145,8 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 # =========================================================
 resource "azurerm_windows_virtual_machine" "windows_vm" {
   count               = var.os_type == "Windows" ? var.number_of_vms : 0
-  name                = "${var.environment}-terraform-vm-${count.index}"
+  name                = "${var.environment}-TF-vm-${count.index}"
+  computer_name       = "TF${substr(var.environment, 0, 3)}${count.index}"  # e.g. TFdev0 → only 7 chars!
   location            = local.rg_location
   resource_group_name = local.rg_name
   size                = var.vm_size
