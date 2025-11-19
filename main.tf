@@ -46,14 +46,14 @@ resource "random_password" "vm_password" {
 # Virtual Network & Subnet
 # =========================================================
 resource "azurerm_virtual_network" "vnet" {
-  name                = "${var.environment}-vnet"
+  name                = "${var.environment}-terraform-vnet"
   address_space       = ["10.0.0.0/16"]
   location            = local.rg_location
   resource_group_name = local.rg_name
 }
 
 resource "azurerm_subnet" "subnet" {
-  name                 = "${var.environment}-subnet"
+  name                 = "${var.environment}-terraform-subnet"
   resource_group_name  = local.rg_name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = ["10.0.1.0/24"]
@@ -64,7 +64,7 @@ resource "azurerm_subnet" "subnet" {
 # =========================================================
 resource "azurerm_public_ip" "vm_ip" {
   count               = var.number_of_vms
-  name                = "${var.environment}-vm-${count.index}-ip"
+  name                = "${var.environment}-terraform-vm-${count.index}-ip"
   location            = local.rg_location
   resource_group_name = local.rg_name
   allocation_method   = local.use_zone ? "Static" : "Dynamic"
@@ -78,7 +78,7 @@ resource "azurerm_public_ip" "vm_ip" {
 # =========================================================
 resource "azurerm_network_interface" "vm_nic" {
   count               = var.number_of_vms
-  name                = "${var.environment}-vm-${count.index}-nic"
+  name                = "${var.environment}-terraform-vm-${count.index}-nic"
   location            = local.rg_location
   resource_group_name = local.rg_name
 
@@ -95,7 +95,7 @@ resource "azurerm_network_interface" "vm_nic" {
 # =========================================================
 resource "azurerm_linux_virtual_machine" "linux_vm" {
   count                           = var.os_type == "Linux" ? var.number_of_vms : 0
-  name                            = "${var.environment}-vm-${count.index}"
+  name                            = "${var.environment}-terraform-vm-${count.index}"
   location                        = local.rg_location
   resource_group_name             = local.rg_name
   size                            = var.vm_size
@@ -105,7 +105,7 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
   network_interface_ids           = [azurerm_network_interface.vm_nic[count.index].id]
 
   os_disk {
-    name                 = "${var.environment}-osdisk-${count.index}"
+    name                 = "${var.environment}-terraform-osdisk-${count.index}"
     caching              = "ReadWrite"
     storage_account_type = var.disk_type
     disk_size_gb         = local.disk_size_gb
@@ -145,7 +145,7 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 # =========================================================
 resource "azurerm_windows_virtual_machine" "windows_vm" {
   count               = var.os_type == "Windows" ? var.number_of_vms : 0
-  name                = "${var.environment}-vm-${count.index}"
+  name                = "${var.environment}-terraform-vm-${count.index}"
   location            = local.rg_location
   resource_group_name = local.rg_name
   size                = var.vm_size
@@ -154,7 +154,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   network_interface_ids = [azurerm_network_interface.vm_nic[count.index].id]
 
   os_disk {
-    name                 = "${var.environment}-osdisk-${count.index}"
+    name                 = "${var.environment}-terraform-osdisk-${count.index}"
     caching              = "ReadWrite"
     storage_account_type = var.disk_type
     disk_size_gb         = local.disk_size_gb
