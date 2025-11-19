@@ -1,33 +1,32 @@
 # main.tf — ONLY resources, locals, and provider
-# "If exists → use it, else → create it" where supported – FIXED for VMs (plan-time check not possible)
+# No terraform {}, no required_providers, no outputs — those go in versions.tf and outputs.tf
 
 provider "azurerm" {
   features {}
 }
 
 # =========================================================
-# Resource Group – use existing or create
+# Resource Group – auto-detect or create if not exists
 # =========================================================
 data "azurerm_resource_group" "existing_rg" {
   name = var.resource_group
 }
 
 resource "azurerm_resource_group" "rg" {
-  count    = try(data.azurerm_resource_group.existing_rg.id, null) == null ? 1 : 0
+  count    = try(data.azurerm_resource_group.existing_rg.name, null) == null ? 1 : 0
   name     = var.resource_group
   location = var.location
 }
 
 locals {
-  rg_name     = coalesce(try(data.azurerm_resource_group.existing_rg.name, null), azurerm_resource_group.rg[0].name)
-  rg_location = coalesce(try(data.azurerm_resource_group.existing_rg.location, null), azurerm_resource_group.rg[0].location)
+  rg_name     = coalesce(try(data.azurerm_resource_group.existing_rg.name, null), try(azurerm_resource_group.rg[0].name, null))
+  rg_location = coalesce(try(data.azurerm_resource_group.existing_rg.location, null), try(azurerm_resource_group.rg[0].location, var.location))
 
   use_zone     = contains(["1", "2", "3"], var.availability_zone)
   disk_size_gb = var.os_type == "Windows" ? max(var.disk_size, 128) : var.disk_size
-  admin_password = random_password.vm_password.result
 
-  # Index set for all VMs
-  vm_indices = range(var.number_of_vms)
+  # Final password passed to VM
+  admin_password = random_password.vm_password.result
 }
 
 # =========================================================
@@ -44,58 +43,28 @@ resource "random_password" "vm_password" {
 }
 
 # =========================================================
-# Virtual Network – use existing or create
+# Virtual Network & Subnet
 # =========================================================
-data "azurerm_virtual_network" "existing_vnet" {
-  name                = "${var.environment}-vnet"
-  resource_group_name = local.rg_name
-}
-
 resource "azurerm_virtual_network" "vnet" {
-  count               = try(data.azurerm_virtual_network.existing_vnet.id, null) == null ? 1 : 0
   name                = "${var.environment}-vnet"
   address_space       = ["10.0.0.0/16"]
   location            = local.rg_location
   resource_group_name = local.rg_name
 }
 
-locals {
-  vnet_name = try(data.azurerm_virtual_network.existing_vnet.name, azurerm_virtual_network.vnet[0].name)
-}
-
-# =========================================================
-# Subnet – use existing or create
-# =========================================================
-data "azurerm_subnet" "existing_subnet" {
-  name                 = "${var.environment}-subnet"
-  virtual_network_name = local.vnet_name
-  resource_group_name  = local.rg_name
-}
-
 resource "azurerm_subnet" "subnet" {
-  count                = try(data.azurerm_subnet.existing_subnet.id, null) == null ? 1 : 0
   name                 = "${var.environment}-subnet"
   resource_group_name  = local.rg_name
-  virtual_network_name = local.vnet_name
+  virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = ["10.0.1.0/24"]
 }
 
-locals {
-  subnet_id = try(data.azurerm_subnet.existing_subnet.id, azurerm_subnet.subnet[0].id)
-}
-
 # =========================================================
-# Public IP – per VM, use existing or create
+# Public IP
 # =========================================================
-data "azurerm_public_ip" "existing_pip" {
-  for_each            = toset([for i in local.vm_indices : "${var.environment}-vm-${i}-ip"])
-  name                = each.value
-  resource_group_name = local.rg_name
-}
-
 resource "azurerm_public_ip" "vm_ip" {
-  for_each            = { for idx in local.vm_indices : idx => idx if try(data.azurerm_public_ip.existing_pip["${var.environment}-vm-${idx}-ip"].id, null) == null }
-  name                = "${var.environment}-vm-${each.value}-ip"
+  count               = var.number_of_vms
+  name                = "${var.environment}-vm-${count.index}-ip"
   location            = local.rg_location
   resource_group_name = local.rg_name
   allocation_method   = local.use_zone ? "Static" : "Dynamic"
@@ -104,65 +73,39 @@ resource "azurerm_public_ip" "vm_ip" {
   zones               = local.use_zone ? [var.availability_zone] : null
 }
 
-locals {
-  public_ip_id = {
-    for idx in local.vm_indices :
-    idx => try(data.azurerm_public_ip.existing_pip["${var.environment}-vm-${idx}-ip"].id, azurerm_public_ip.vm_ip[idx].id)
-  }
-}
-
 # =========================================================
-# Network Interface – per VM, use existing or create
+# Network Interface
 # =========================================================
-data "azurerm_network_interface" "existing_nic" {
-  for_each            = toset([for i in local.vm_indices : "${var.environment}-vm-${i}-nic"])
-  name                = each.value
-  resource_group_name = local.rg_name
-}
-
 resource "azurerm_network_interface" "vm_nic" {
-  for_each = {
-    for idx in local.vm_indices :
-    idx => idx
-    if try(data.azurerm_network_interface.existing_nic["${var.environment}-vm-${idx}-nic"].id, null) == null
-  }
-
-  name                = "${var.environment}-vm-${each.value}-nic"
+  count               = var.number_of_vms
+  name                = "${var.environment}-vm-${count.index}-nic"
   location            = local.rg_location
   resource_group_name = local.rg_name
 
   ip_configuration {
     name                          = "internal"
-    subnet_id                     = local.subnet_id
+    subnet_id                     = azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = local.public_ip_id[each.value]
-  }
-}
-
-locals {
-  nic_id = {
-    for idx in local.vm_indices :
-    idx => try(data.azurerm_network_interface.existing_nic["${var.environment}-vm-${idx}-nic"].id, azurerm_network_interface.vm_nic[idx].id)
+    public_ip_address_id          = azurerm_public_ip.vm_ip[count.index].id
   }
 }
 
 # =========================================================
-# LINUX VMs – create if needed (existence checked at apply-time)
+# LINUX VMs
 # =========================================================
 resource "azurerm_linux_virtual_machine" "linux_vm" {
-  for_each = var.os_type == "Linux" ? { for idx in local.vm_indices : idx => idx } : {}
-
-  name                            = "${var.environment}-vm-${each.value}"
+  count                           = var.os_type == "Linux" ? var.number_of_vms : 0
+  name                            = "${var.environment}-vm-${count.index}"
   location                        = local.rg_location
   resource_group_name             = local.rg_name
   size                            = var.vm_size
   admin_username                  = "azureuser"
   admin_password                  = local.admin_password
   disable_password_authentication = false
-  network_interface_ids           = [local.nic_id[each.value]]
+  network_interface_ids           = [azurerm_network_interface.vm_nic[count.index].id]
 
   os_disk {
-    name                 = "${var.environment}-osdisk-${each.value}"
+    name                 = "${var.environment}-osdisk-${count.index}"
     caching              = "ReadWrite"
     storage_account_type = var.disk_type
     disk_size_gb         = local.disk_size_gb
@@ -177,6 +120,18 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 
   zone = local.use_zone ? var.availability_zone : null
 
+  lifecycle {
+    replace_triggered_by = [
+      azurerm_network_interface.vm_nic[count.index],
+      azurerm_public_ip.vm_ip[count.index]
+    ]
+  }
+
+  depends_on = [
+    azurerm_network_interface.vm_nic,
+    azurerm_public_ip.vm_ip
+  ]
+
   tags = {
     Environment = var.environment
     VM_Series   = var.vm_series
@@ -186,21 +141,20 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 }
 
 # =========================================================
-# WINDOWS VMs – create if needed (existence checked at apply-time)
+# WINDOWS VMs
 # =========================================================
 resource "azurerm_windows_virtual_machine" "windows_vm" {
-  for_each = var.os_type == "Windows" ? { for idx in local.vm_indices : idx => idx } : {}
-
-  name                  = "${var.environment}-vm-${each.value}"
-  location              = local.rg_location
-  resource_group_name   = local.rg_name
-  size                  = var.vm_size
-  admin_username        = "azureuser"
-  admin_password        = local.admin_password
-  network_interface_ids = [local.nic_id[each.value]]
+  count               = var.os_type == "Windows" ? var.number_of_vms : 0
+  name                = "${var.environment}-vm-${count.index}"
+  location            = local.rg_location
+  resource_group_name = local.rg_name
+  size                = var.vm_size
+  admin_username      = "azureuser"
+  admin_password      = local.admin_password
+  network_interface_ids = [azurerm_network_interface.vm_nic[count.index].id]
 
   os_disk {
-    name                 = "${var.environment}-osdisk-${each.value}"
+    name                 = "${var.environment}-osdisk-${count.index}"
     caching              = "ReadWrite"
     storage_account_type = var.disk_type
     disk_size_gb         = local.disk_size_gb
@@ -214,6 +168,18 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   }
 
   zone = local.use_zone ? var.availability_zone : null
+
+  lifecycle {
+    replace_triggered_by = [
+      azurerm_network_interface.vm_nic[count.index],
+      azurerm_public_ip.vm_ip[count.index]
+    ]
+  }
+
+  depends_on = [
+    azurerm_network_interface.vm_nic,
+    azurerm_public_ip.vm_ip
+  ]
 
   tags = {
     Environment = var.environment
