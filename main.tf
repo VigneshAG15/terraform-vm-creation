@@ -1,5 +1,5 @@
 # main.tf — ONLY resources, locals, and provider
-# "If exists → use it, else → create it" for EVERYTHING – 100% working
+# "If exists → use it, else → create it" for EVERYTHING – FIXED for VM data sources
 
 provider "azurerm" {
   features {}
@@ -147,20 +147,26 @@ locals {
 }
 
 # =========================================================
-# LINUX VMs – use existing or create
+# All Existing VMs in RG (generic data source for both Linux & Windows)
 # =========================================================
-data "azurerm_linux_virtual_machine" "existing_linux_vm" {
-  for_each = var.os_type == "Linux" ? { for i in local.vm_indices : i => i } : {}
-  name                = "${var.environment}-vm-${each.value}"
+data "azurerm_virtual_machines" "existing_vms" {
   resource_group_name = local.rg_name
 }
 
+# Helper: Map of existing VM names to indices (for skipping creation)
+locals {
+  existing_vm_names = { for vm in data.azurerm_virtual_machines.existing_vms.virtual_machines : vm.name => vm }
+  vm_to_create = {
+    for idx in local.vm_indices : idx => idx
+    if !contains(keys(local.existing_vm_names), "${var.environment}-vm-${idx}")
+  }
+}
+
+# =========================================================
+# LINUX VMs – use existing or create
+# =========================================================
 resource "azurerm_linux_virtual_machine" "linux_vm" {
-  for_each = var.os_type == "Linux" ? {
-    for idx in local.vm_indices :
-    idx => idx
-    if try(data.azurerm_linux_virtual_machine.existing_linux_vm[idx].id, null) == null
-  } : {}
+  for_each = var.os_type == "Linux" ? local.vm_to_create : {}
 
   name                            = "${var.environment}-vm-${each.value}"
   location                        = local.rg_location
@@ -198,18 +204,8 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 # =========================================================
 # WINDOWS VMs – use existing or create
 # =========================================================
-data "azurerm_windows_virtual_machine" "existing_windows_vm" {
-  for_each = var.os_type == "Windows" ? { for i in local.vm_indices : i => i } : {}
-  name                = "${var.environment}-vm-${each.value}"
-  resource_group_name = local.rg_name
-}
-
 resource "azurerm_windows_virtual_machine" "windows_vm" {
-  for_each = var.os_type == "Windows" ? {
-    for idx in local.vm_indices :
-    idx => idx
-    if try(data.azurerm_windows_virtual_machine.existing_windows_vm[idx].id, null) == null
-  } : {}
+  for_each = var.os_type == "Windows" ? local.vm_to_create : {}
 
   name                  = "${var.environment}-vm-${each.value}"
   location              = local.rg_location
