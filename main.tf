@@ -1,5 +1,5 @@
 # main.tf — ONLY resources, locals, and provider
-# "If exists → use it, else → create it" for EVERYTHING – FIXED for VM data sources
+# "If exists → use it, else → create it" where supported – FIXED for VMs (plan-time check not possible)
 
 provider "azurerm" {
   features {}
@@ -147,26 +147,10 @@ locals {
 }
 
 # =========================================================
-# All Existing VMs in RG (generic data source for both Linux & Windows)
-# =========================================================
-data "azurerm_virtual_machines" "existing_vms" {
-  resource_group_name = local.rg_name
-}
-
-# Helper: Map of existing VM names to indices (for skipping creation)
-locals {
-  existing_vm_names = { for vm in data.azurerm_virtual_machines.existing_vms.virtual_machines : vm.name => vm }
-  vm_to_create = {
-    for idx in local.vm_indices : idx => idx
-    if !contains(keys(local.existing_vm_names), "${var.environment}-vm-${idx}")
-  }
-}
-
-# =========================================================
-# LINUX VMs – use existing or create
+# LINUX VMs – create if needed (existence checked at apply-time)
 # =========================================================
 resource "azurerm_linux_virtual_machine" "linux_vm" {
-  for_each = var.os_type == "Linux" ? local.vm_to_create : {}
+  for_each = var.os_type == "Linux" ? { for idx in local.vm_indices : idx => idx } : {}
 
   name                            = "${var.environment}-vm-${each.value}"
   location                        = local.rg_location
@@ -202,10 +186,10 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 }
 
 # =========================================================
-# WINDOWS VMs – use existing or create
+# WINDOWS VMs – create if needed (existence checked at apply-time)
 # =========================================================
 resource "azurerm_windows_virtual_machine" "windows_vm" {
-  for_each = var.os_type == "Windows" ? local.vm_to_create : {}
+  for_each = var.os_type == "Windows" ? { for idx in local.vm_indices : idx => idx } : {}
 
   name                  = "${var.environment}-vm-${each.value}"
   location              = local.rg_location
