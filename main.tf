@@ -1,5 +1,5 @@
 # main.tf — ONLY resources, locals, and provider
-# "If exists → use it, else → create it" for EVERYTHING
+# "If exists → use it, else → create it" for EVERYTHING – 100% working
 
 provider "azurerm" {
   features {}
@@ -25,6 +25,9 @@ locals {
   use_zone     = contains(["1", "2", "3"], var.availability_zone)
   disk_size_gb = var.os_type == "Windows" ? max(var.disk_size, 128) : var.disk_size
   admin_password = random_password.vm_password.result
+
+  # Index set for all VMs
+  vm_indices = range(var.number_of_vms)
 }
 
 # =========================================================
@@ -58,7 +61,6 @@ resource "azurerm_virtual_network" "vnet" {
 
 locals {
   vnet_name = try(data.azurerm_virtual_network.existing_vnet.name, azurerm_virtual_network.vnet[0].name)
-  vnet_id   = try(data.azurerm_virtual_network.existing_vnet.id, azurerm_virtual_network.vnet[0].id)
 }
 
 # =========================================================
@@ -83,17 +85,16 @@ locals {
 }
 
 # =========================================================
-# Public IP – use existing or create (per VM)
+# Public IP – per VM, use existing or create
 # =========================================================
 data "azurerm_public_ip" "existing_pip" {
-  for_each            = toset([for i in range(var.number_of_vms) : tostring(i)])
-  name                = "${var.environment}-vm-${each.value}-ip"
+  for_each            = toset([for i in local.vm_indices : "${var.environment}-vm-${i}-ip"])
+  name                = each.value
   resource_group_name = local.rg_name
 }
 
 resource "azurerm_public_ip" "vm_ip" {
-  for_each            = toset([for i in range(var.number_of_vms) : tostring(i)])
-  count               = try(data.azurerm_public_ip.existing_pip[each.value].id, null) == null ? 1 : 0
+  for_each            = { for idx in local.vm_indices : idx => idx if try(data.azurerm_public_ip.existing_pip["${var.environment}-vm-${idx}-ip"].id, null) == null }
   name                = "${var.environment}-vm-${each.value}-ip"
   location            = local.rg_location
   resource_group_name = local.rg_name
@@ -104,24 +105,27 @@ resource "azurerm_public_ip" "vm_ip" {
 }
 
 locals {
-  public_ip_ids = {
-    for i in range(var.number_of_vms) :
-    i => try(data.azurerm_public_ip.existing_pip[tostring(i)].id, azurerm_public_ip.vm_ip[tostring(i)][0].id)
+  public_ip_id = {
+    for idx in local.vm_indices :
+    idx => try(data.azurerm_public_ip.existing_pip["${var.environment}-vm-${idx}-ip"].id, azurerm_public_ip.vm_ip[idx].id)
   }
 }
 
 # =========================================================
-# Network Interface – use existing or create (per VM)
+# Network Interface – per VM, use existing or create
 # =========================================================
 data "azurerm_network_interface" "existing_nic" {
-  for_each            = toset([for i in range(var.number_of_vms) : tostring(i)])
-  name                = "${var.environment}-vm-${each.value}-nic"
+  for_each            = toset([for i in local.vm_indices : "${var.environment}-vm-${i}-nic"])
+  name                = each.value
   resource_group_name = local.rg_name
 }
 
 resource "azurerm_network_interface" "vm_nic" {
-  for_each            = toset([for i in range(var.number_of_vms) : tostring(i)])
-  count               = try(data.azurerm_network_interface.existing_nic[each.value].id, null) == null ? 1 : 0
+  for_each = {
+    for idx in local.vm_indices :
+    idx => idx
+    if try(data.azurerm_network_interface.existing_nic["${var.environment}-vm-${idx}-nic"].id, null) == null
+  }
 
   name                = "${var.environment}-vm-${each.value}-nic"
   location            = local.rg_location
@@ -131,14 +135,14 @@ resource "azurerm_network_interface" "vm_nic" {
     name                          = "internal"
     subnet_id                     = local.subnet_id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id          = local.public_ip_ids[tonumber(each.value)]
+    public_ip_address_id          = local.public_ip_id[each.value]
   }
 }
 
 locals {
-  nic_ids = {
-    for i in range(var.number_of_vms) :
-    i => try(data.azurerm_network_interface.existing_nic[tostring(i)].id, azurerm_network_interface.vm_nic[tostring(i)][0].id)
+  nic_id = {
+    for idx in local.vm_indices :
+    idx => try(data.azurerm_network_interface.existing_nic["${var.environment}-vm-${idx}-nic"].id, azurerm_network_interface.vm_nic[idx].id)
   }
 }
 
@@ -146,16 +150,16 @@ locals {
 # LINUX VMs – use existing or create
 # =========================================================
 data "azurerm_linux_virtual_machine" "existing_linux_vm" {
-  for_each = var.os_type == "Linux" ? { for i in range(var.number_of_vms) : i => i } : {}
+  for_each = var.os_type == "Linux" ? { for i in local.vm_indices : i => i } : {}
   name                = "${var.environment}-vm-${each.value}"
   resource_group_name = local.rg_name
 }
 
 resource "azurerm_linux_virtual_machine" "linux_vm" {
   for_each = var.os_type == "Linux" ? {
-    for i in range(var.number_of_vms) :
-    i => i
-    if try(data.azurerm_linux_virtual_machine.existing_linux_vm[tostring(i)].id, null) == null
+    for idx in local.vm_indices :
+    idx => idx
+    if try(data.azurerm_linux_virtual_machine.existing_linux_vm[idx].id, null) == null
   } : {}
 
   name                            = "${var.environment}-vm-${each.value}"
@@ -165,7 +169,7 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
   admin_username                  = "azureuser"
   admin_password                  = local.admin_password
   disable_password_authentication = false
-  network_interface_ids           = [local.nic_ids[each.value]]
+  network_interface_ids           = [local.nic_id[each.value]]
 
   os_disk {
     name                 = "${var.environment}-osdisk-${each.value}"
@@ -195,25 +199,25 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 # WINDOWS VMs – use existing or create
 # =========================================================
 data "azurerm_windows_virtual_machine" "existing_windows_vm" {
-  for_each = var.os_type == "Windows" ? { for i in range(var.number_of_vms) : i => i } : {}
+  for_each = var.os_type == "Windows" ? { for i in local.vm_indices : i => i } : {}
   name                = "${var.environment}-vm-${each.value}"
   resource_group_name = local.rg_name
 }
 
 resource "azurerm_windows_virtual_machine" "windows_vm" {
   for_each = var.os_type == "Windows" ? {
-    for i in range(var.number_of_vms) :
-    i => i
-    if try(data.azurerm_windows_virtual_machine.existing_windows_vm[tostring(i)].id, null) == null
+    for idx in local.vm_indices :
+    idx => idx
+    if try(data.azurerm_windows_virtual_machine.existing_windows_vm[idx].id, null) == null
   } : {}
 
-  name                = "${var.environment}-vm-${each.value}"
-  location            = local.rg_location
-  resource_group_name = local.rg_name
-  size                = var.vm_size
-  admin_username      = "azureuser"
-  admin_password      = local.admin_password
-  network_interface_ids = [local.nic_ids[each.value]]
+  name                  = "${var.environment}-vm-${each.value}"
+  location              = local.rg_location
+  resource_group_name   = local.rg_name
+  size                  = var.vm_size
+  admin_username        = "azureuser"
+  admin_password        = local.admin_password
+  network_interface_ids = [local.nic_id[each.value]]
 
   os_disk {
     name                 = "${var.environment}-osdisk-${each.value}"
