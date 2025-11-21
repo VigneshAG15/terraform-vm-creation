@@ -1,7 +1,10 @@
 # outputs.tf
 output "vm_public_ips" {
   description = "Public IP addresses of created VMs"
-  value       = azurerm_public_ip.vm_ip[*].ip_address
+  value = concat(
+    azurerm_linux_virtual_machine.linux_vm[*].public_ip_address,
+    azurerm_windows_virtual_machine.windows_vm[*].public_ip_address
+  )
 }
 
 output "admin_username" {
@@ -17,7 +20,7 @@ output "admin_password" {
 
 output "vm_names" {
   description = "Names of created VMs"
-  value = coalesce(
+  value = concat(
     azurerm_linux_virtual_machine.linux_vm[*].name,
     azurerm_windows_virtual_machine.windows_vm[*].name
   )

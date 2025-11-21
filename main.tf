@@ -133,6 +133,7 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
   ]
 
   tags = {
+    CreatedBy   = "Terraform"
     Environment = var.environment
     VM_Series   = var.vm_series
     OS_Name     = "Linux"
@@ -183,6 +184,7 @@ resource "azurerm_windows_virtual_machine" "windows_vm" {
   ]
 
   tags = {
+    CreatedBy   = "Terraform"
     Environment = var.environment
     VM_Series   = var.vm_series
     OS_Name     = "Windows"
