@@ -67,11 +67,22 @@ resource "azurerm_public_ip" "vm_ip" {
   name                = "${var.environment}-terraform-vm-${count.index}-ip"
   location            = local.rg_location
   resource_group_name = local.rg_name
-  allocation_method   = local.use_zone ? "Static" : "Dynamic"
-  sku                 = local.use_zone ? "Standard" : "Basic"
+  allocation_method   = "Static"
+  sku                 = "Standard"
   sku_tier            = "Regional"
   zones               = local.use_zone ? [var.availability_zone] : null
 }
+
+data "azurerm_public_ip" "vm_ip_data" {
+  count               = var.number_of_vms
+  name                = azurerm_public_ip.vm_ip[count.index].name
+  resource_group_name = azurerm_public_ip.vm_ip[count.index].resource_group_name
+
+  depends_on = [
+    azurerm_network_interface.vm_nic
+  ]
+}
+
 
 # =========================================================
 # Network Interface
