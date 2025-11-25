@@ -110,3 +110,8 @@ variable "number_of_vms" {
     error_message = "number_of_vms must be between 1 and 100."
   }
 }
+
+variable "request_id" {
+  type    = string
+  default = "unknown"
+}

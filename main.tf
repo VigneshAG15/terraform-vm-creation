@@ -40,6 +40,10 @@ resource "random_password" "vm_password" {
   min_upper        = 1
   min_numeric      = 1
   min_special      = 1
+
+  keepers = {
+    request_id = var.request_id
+  }
 }
 
 # =========================================================
@@ -82,6 +86,7 @@ data "azurerm_public_ip" "vm_ip_data" {
     azurerm_network_interface.vm_nic
   ]
 }
+
 
 
 # =========================================================
@@ -158,7 +163,7 @@ resource "azurerm_linux_virtual_machine" "linux_vm" {
 resource "azurerm_windows_virtual_machine" "windows_vm" {
   count               = var.os_type == "Windows" ? var.number_of_vms : 0
   name                = "${var.environment}-TF-vm-${count.index}"
-  computer_name       = "TF${substr(var.environment, 0, 3)}${count.index}"  # e.g. TFdev0 → only 7 chars!
+  computer_name       = "TF${substr(var.environment, 0, 3)}${count.index}"
   location            = local.rg_location
   resource_group_name = local.rg_name
   size                = var.vm_size
